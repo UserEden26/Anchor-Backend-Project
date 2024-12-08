@@ -13,7 +13,7 @@
 1. Clone the repository:
    ```bash
    git clone https://github.com/UserEden26/Anchor-Backend-Project.git
-   cd project-name
+   cd Anchor-Backend-Project
    ```
 2. Install dependencies:
 
