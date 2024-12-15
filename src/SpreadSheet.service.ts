@@ -1,5 +1,5 @@
 import { v4 as uuid4 } from "uuid";
-import { SpreadSheet } from "./types";
+import { Column, ColumnType, SpreadSheet } from "./types";
 import { NotExsistSheetError } from "./errors/NotExsistSheetError";
 import { InvalidCellIndexError } from "./errors/InvalidCellIndexError";
 import { NotExsistColumnError } from "./errors/NotExsistColumnError";
@@ -9,10 +9,12 @@ import { isValueMatchingColumnType } from "./utils/isValueMatchingColumnType";
 import { InvalidLookUpSyntaxError } from "./errors/InvalidLookUpSyntaxError";
 import { DuplicateColumnNamesError } from "./errors/DuplicateColumnNamesError";
 import { CircularRefrenceError } from "./errors/CircularRefrenceError";
+import { InvalidSumSyntaxError } from "./errors/InvalidSumSyntaxError";
 
 export class SpreadSheetService {
   SHEETS: Record<string, SpreadSheet> = {};
   lookupRegex = /lookup\("(.+)",\s*(\d+)\)/;
+  sumRegex = /sum\("([^"]+)",\s*(\d+),\s*(\d+)\)$/;
 
   createNewSheet(newSheet: SpreadSheet) {
     const id = uuid4();
@@ -51,6 +53,22 @@ export class SpreadSheetService {
     const column = matchSheet.columns[columnIndex];
     let resolvedValue = value;
 
+    if (this.isSumFunction(value)) {
+      const match = (value as string).match(this.sumRegex);
+      if (!match) {
+        throw new InvalidSumSyntaxError();
+      }
+
+      const [_, __, startSumIndexStr, endSumIndexStr] = match;
+      const startSumIndex = parseInt(startSumIndexStr, 10);
+      const endSumIndex = parseInt(endSumIndexStr, 10);
+
+      resolvedValue = 0;
+      for (let i = startSumIndex; i <= endSumIndex; i++) {
+        resolvedValue += column.values.get(i);
+      }
+    }
+
     if (this.isLookupFunction(value)) {
       const match = (value as string).match(this.lookupRegex);
       if (!match) {
@@ -81,6 +99,10 @@ export class SpreadSheetService {
     }
 
     column.values.set(cellIndex, resolvedValue);
+  }
+
+  private isSumFunction(value: unknown) {
+    return typeof value === "string" && value.startsWith("sum(");
   }
 
   private isLookupFunction(value: unknown) {
@@ -129,6 +151,12 @@ export class SpreadSheetService {
     const column = sheet.columns[columnIndex];
 
     return column.values.get(cellIndex);
+  }
+
+  sum(column: Column) {
+    if (column.type != ColumnType.DOUBLE || column.type != ColumnType.DOUBLE) {
+      throw "error";
+    }
   }
 
   private detectCycle(
