@@ -37,43 +37,25 @@ export class SpreadSheetService {
   ) {
     const matchSheet = this.getSheetById(sheetId);
 
-    if (cellIndex < 0 || Number.isNaN(cellIndex)) {
-      throw new InvalidCellIndexError();
-    }
-
-    const columnIndex = matchSheet.columns.findIndex(
-      (column) => column.name === columnName
+    const column = this.validateCellReturnColumn(
+      matchSheet,
+      columnName,
+      cellIndex
     );
-    if (columnIndex == -1) {
-      throw new NotExsistColumnError();
-    }
 
-    const column = matchSheet.columns[columnIndex];
     let resolvedValue = value;
-
     if (this.isLookupFunction(value)) {
       const match = (value as string).match(this.lookupRegex);
       if (!match) {
         throw new InvalidLookUpSyntaxError();
       }
 
-      const [_, lookupColumnName, lookupRowIndexStr] = match;
-      const lookupRowIndex = parseInt(lookupRowIndexStr, 10);
-
-      resolvedValue = this.getCell(
+      resolvedValue = this.detectCycleReturnRefValue(
         matchSheet,
-        lookupColumnName,
-        lookupRowIndex
+        columnName,
+        cellIndex,
+        value
       );
-
-      // check if the pointer of the cell in the lookup is valid, if not throw
-      this.detectCycle(matchSheet, columnName, cellIndex, false);
-
-      if (resolvedValue === undefined) {
-        throw new CellNotSetError(
-          `Lookup target cell (${lookupColumnName}, ${lookupRowIndex}) does not exist`
-        );
-      }
     }
 
     if (!isValueMatchingColumnType(column.type, resolvedValue)) {
@@ -105,7 +87,7 @@ export class SpreadSheetService {
 
         if (this.isLookupFunction(value)) {
           // on create of the sheet check if any of the lookup pointer point to unset value
-          this.detectCycle(sheet, col.name, index, true);
+          this.detectCycleReturnRefValue(sheet, col.name, index, true);
         } else if (!isValueMatchingColumnType(col.type, value)) {
           throw new CellTypeError();
         }
@@ -113,7 +95,11 @@ export class SpreadSheetService {
     });
   }
 
-  getCell(sheet: SpreadSheet, columnName: string, cellIndex: number) {
+  private validateCellReturnColumn(
+    sheet: SpreadSheet,
+    columnName: string,
+    cellIndex: number
+  ) {
     if (cellIndex < 0 || Number.isNaN(cellIndex)) {
       throw new InvalidCellIndexError();
     }
@@ -126,19 +112,19 @@ export class SpreadSheetService {
       throw new NotExsistColumnError();
     }
 
-    const column = sheet.columns[columnIndex];
-
-    return column.values.get(cellIndex);
+    return sheet.columns[columnIndex];
   }
 
-  private detectCycle(
+  private detectCycleReturnRefValue(
     matchSheet: SpreadSheet,
     columnName: string,
     cellIndex: number,
-    throwOnNotSetValueRefrence: boolean
+    firstValue?: any
   ) {
     const visitedColumnsCells = new Set<string>();
-    const stack = [`${columnName}:${cellIndex}`];
+    const startCell = `${columnName}:${cellIndex}`;
+    const stack = [startCell];
+    let refValue = undefined;
 
     while (stack.length > 0) {
       const current = stack.pop()!;
@@ -150,11 +136,21 @@ export class SpreadSheetService {
       visitedColumnsCells.add(current);
 
       const [currentColName, currentRowIndex] = current.split(":");
-      const col = matchSheet.columns.find((c) => c.name === currentColName);
+      const rowIndex = parseInt(currentRowIndex, 10);
+      const col = this.validateCellReturnColumn(
+        matchSheet,
+        currentColName,
+        rowIndex
+      );
 
       if (col) {
-        const rowIndex = parseInt(currentRowIndex, 10);
-        const refValue = col.values.get(rowIndex);
+        refValue = col.values.get(rowIndex);
+        if (
+          firstValue !== undefined &&
+          `${currentColName}:${currentRowIndex}` === startCell
+        ) {
+          refValue = firstValue;
+        }
 
         if (this.isLookupFunction(refValue)) {
           const refMatch = refValue.match(this.lookupRegex);
@@ -164,12 +160,21 @@ export class SpreadSheetService {
             const refKey = `${refColName}:${refRowIndex}`;
             stack.push(refKey);
           }
-        } else if (throwOnNotSetValueRefrence && refValue == undefined) {
+        } else if (refValue == undefined) {
           throw new CellNotSetError(
             `cell ${currentColName}:${rowIndex} is not set`
           );
         }
       }
     }
+    return refValue;
   }
 }
+
+// A1 -> B1 -> C1 = (123)
+// c1 = lookup(A1)
+// A1 -> B1 -> C1 -> A1
+// B1 -> C1 -> A1 -> 123
+
+// יעשה את ה SET לפני
+// lookup()

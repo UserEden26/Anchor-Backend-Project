@@ -194,4 +194,43 @@ describe("SpreadSheetService.createNewSheet method", () => {
 
     expect(() => service.createNewSheet(sheet)).toThrow(CellNotSetError);
   });
+
+  it("should", () => {
+    const sheet: SpreadSheet = {
+      columns: [
+        {
+          name: "A",
+          type: ColumnType.STR,
+          values: new Map([[1, 'lookup("B", 1)']]),
+        },
+        {
+          name: "B",
+          type: ColumnType.STR,
+          values: new Map([[1, 'lookup("C", 1)']]),
+        },
+        {
+          name: "C",
+          type: ColumnType.STR,
+          values: new Map([[1, 'lookup("A",1)']]),
+        },
+      ],
+    };
+
+    expect(() => service.createNewSheet(sheet)).toThrow(CircularRefrenceError);
+  });
+  // it("should throw an error for a circular reference for circular on itself", () => {
+  //   const sheet: SpreadSheet = {
+  //     columns: [
+  //       {
+  //         name: "A",
+  //         type: ColumnType.STR,
+  //         values: new Map<number, string>([
+  //           [1, 'lookup("A", 1)'], // A(1) references A(1)
+  //         ]),
+  //       },
+  //     ],
+  //   };
+
+  //   expect(() => service.createNewSheet(sheet)).toThrow(CircularRefrenceError);
+  // });
 });
