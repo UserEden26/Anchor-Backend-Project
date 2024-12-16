@@ -1,5 +1,5 @@
 import { v4 as uuid4 } from "uuid";
-import { SpreadSheet } from "./types";
+import { Column, SpreadSheet } from "./types";
 import { NotExsistSheetError } from "./errors/NotExsistSheetError";
 import { InvalidCellIndexError } from "./errors/InvalidCellIndexError";
 import { NotExsistColumnError } from "./errors/NotExsistColumnError";
@@ -12,6 +12,8 @@ import { CircularRefrenceError } from "./errors/CircularRefrenceError";
 
 export class SpreadSheetService {
   SHEETS: Record<string, SpreadSheet> = {};
+  lookupMap: Map<string, string> = new Map<string, string>();
+
   lookupRegex = /lookup\("(.+)",\s*(\d+)\)/;
 
   createNewSheet(newSheet: SpreadSheet) {
@@ -45,10 +47,19 @@ export class SpreadSheetService {
 
     let resolvedValue = value;
     if (this.isLookupFunction(value)) {
-      const match = (value as string).match(this.lookupRegex);
-      if (!match) {
-        throw new InvalidLookUpSyntaxError();
-      }
+      const [_, refColName, refCellIndexStr] = this.validateMethod(
+        this.lookupRegex,
+        value as string,
+        InvalidLookUpSyntaxError
+      );
+
+      const copyMap = new Map(this.lookupMap);
+      copyMap.set(
+        `${columnName}:${cellIndex}`,
+        `${refColName}:${refCellIndexStr}`
+      );
+
+      this.validateCellReturnColumn(matchSheet, columnName, cellIndex);
 
       resolvedValue = this.detectCycleReturnRefValue(
         matchSheet,
@@ -65,34 +76,99 @@ export class SpreadSheetService {
     column.values.set(cellIndex, resolvedValue);
   }
 
+  private validateMethod(
+    reg: RegExp,
+    value: string,
+    ErrorClass: new () => Error
+  ) {
+    const match = value.match(reg);
+    if (!match) {
+      throw new ErrorClass();
+    }
+    return match;
+  }
+
   private isLookupFunction(value: unknown) {
     return typeof value === "string" && value.startsWith("lookup(");
   }
 
-  private validateSheet(sheet: SpreadSheet) {
+  private hasDuplicatessColumnNames(columns: Column[]) {
     const hasDuplicates =
-      new Set(sheet.columns.map((obj) => obj.name)).size !==
-      sheet.columns.length;
+      new Set(columns.map((obj) => obj.name)).size !== columns.length;
 
     if (hasDuplicates) {
       throw new DuplicateColumnNamesError();
     }
+  }
+
+  private validateSheet(sheet: SpreadSheet) {
+    this.hasDuplicatessColumnNames(sheet.columns);
 
     sheet.columns.forEach((col) => {
       const values = col.values.entries();
       for (const [index, value] of values) {
-        if (value == undefined) {
+        if (value === undefined || value === null) {
           throw new CellNotSetError(`${col.name}:${index} does not set`);
         }
 
         if (this.isLookupFunction(value)) {
-          // on create of the sheet check if any of the lookup pointer point to unset value
-          this.detectCycleReturnRefValue(sheet, col.name, index, true);
+          const [_, refColName, refCellIndex] = this.validateMethod(
+            this.lookupRegex,
+            value,
+            InvalidLookUpSyntaxError
+          );
+
+          this.lookupMap.set(
+            `${col.name}:${index}`,
+            `${refColName}:${refCellIndex}`
+          );
+
+          this.detectCycleReturnRefValue(sheet, col.name, index);
         } else if (!isValueMatchingColumnType(col.type, value)) {
           throw new CellTypeError();
         }
       }
     });
+  }
+
+  getCellValue(sheet: SpreadSheet, columnName: string, cellIndex: number) {
+    const col = this.validateCellReturnColumn(sheet, columnName, cellIndex);
+
+    let cellValue = col.values.get(cellIndex);
+    if (this.isLookupFunction(cellValue)) {
+      const [_, refColName, refCellIndex] = this.validateMethod(
+        this.lookupRegex,
+        cellValue,
+        InvalidLookUpSyntaxError
+      );
+      const refRowIndex = parseInt(refCellIndex, 10);
+
+      cellValue = this.getValueFromLookup(sheet, refColName, refRowIndex);
+    }
+
+    if (cellValue === undefined || cellValue === null) {
+      throw new CellNotSetError(
+        `${col.name}:${cellIndex} or its refrence does not set`
+      );
+    }
+
+    return cellValue;
+  }
+
+  private getValueFromLookup(
+    sheet: SpreadSheet,
+    refColName: string,
+    refCellIndex: number
+  ): any {
+    const cell = `${refColName}:${refCellIndex}`;
+    if (this.lookupMap.has(cell)) {
+      const pointerInMap = this.lookupMap.get(cell)!;
+      const [currentColName, currentRowIndex] = pointerInMap.split(":");
+      const rowIndex = parseInt(currentRowIndex, 10);
+      return this.getValueFromLookup(sheet, currentColName, rowIndex);
+    } else {
+      return this.getCellValue(sheet, refColName, refCellIndex);
+    }
   }
 
   private validateCellReturnColumn(
@@ -112,7 +188,9 @@ export class SpreadSheetService {
       throw new NotExsistColumnError();
     }
 
-    return sheet.columns[columnIndex];
+    const column = sheet.columns[columnIndex];
+
+    return column;
   }
 
   private detectCycleReturnRefValue(

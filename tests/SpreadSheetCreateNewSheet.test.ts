@@ -2,6 +2,7 @@ import { CellNotSetError } from "../src/errors/CellNotSetError";
 import { CellTypeError } from "../src/errors/CellTypeError";
 import { CircularRefrenceError } from "../src/errors/CircularRefrenceError";
 import { DuplicateColumnNamesError } from "../src/errors/DuplicateColumnNamesError";
+import { NotExsistColumnError } from "../src/errors/NotExsistColumnError";
 import { SpreadSheetService } from "../src/SpreadSheet.service";
 import { ColumnType, SpreadSheet } from "../src/types";
 
@@ -195,7 +196,7 @@ describe("SpreadSheetService.createNewSheet method", () => {
     expect(() => service.createNewSheet(sheet)).toThrow(CellNotSetError);
   });
 
-  it("should", () => {
+  it("should throw error when trying to create sheet with ccircular refrence", () => {
     const sheet: SpreadSheet = {
       columns: [
         {
@@ -218,19 +219,50 @@ describe("SpreadSheetService.createNewSheet method", () => {
 
     expect(() => service.createNewSheet(sheet)).toThrow(CircularRefrenceError);
   });
-  // it("should throw an error for a circular reference for circular on itself", () => {
-  //   const sheet: SpreadSheet = {
-  //     columns: [
-  //       {
-  //         name: "A",
-  //         type: ColumnType.STR,
-  //         values: new Map<number, string>([
-  //           [1, 'lookup("A", 1)'], // A(1) references A(1)
-  //         ]),
-  //       },
-  //     ],
-  //   };
 
-  //   expect(() => service.createNewSheet(sheet)).toThrow(CircularRefrenceError);
-  // });
+  it("should throw a NotExsistColumnError when trying to create a sheet with a lookup to unset value", () => {
+    const sheet: SpreadSheet = {
+      columns: [
+        {
+          name: "A",
+          type: ColumnType.STR,
+          values: new Map<number, string>([
+            [1, 'lookup("B", 1)'], // A(1) references B(1) - unset
+          ]),
+        },
+      ],
+    };
+    expect(() => service.createNewSheet(sheet)).toThrow(NotExsistColumnError);
+  });
+
+  it("should throw a NotExsistColumnError when trying to create a sheet with a lookup to unset value", () => {
+    const sheet: SpreadSheet = {
+      columns: [
+        {
+          name: "A",
+          type: ColumnType.STR,
+          values: new Map<number, string>([
+            [1, 'lookup("A", 2)'], // A(1) references A(2) - unset
+          ]),
+        },
+      ],
+    };
+    expect(() => service.createNewSheet(sheet)).toThrow(CellNotSetError);
+  });
+
+  it("should throw an error for a circular reference for circular on itself", () => {
+    const sheet: SpreadSheet = {
+      columns: [
+        {
+          name: "A",
+          type: ColumnType.STR,
+          values: new Map<number, string>([
+            [1, 'lookup("A", 1)'], // A(1) references A(1)
+          ]),
+        },
+      ],
+    };
+
+    expect(() => service.createNewSheet(sheet)).toThrow(CircularRefrenceError);
+  });
 });
